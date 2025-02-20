@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Name Extractor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        .input-section {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .file-input-container {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            border-radius: 8px;
+        }
+        .file-input-container.drag-over {
+            border-color: #007bff;
+            background-color: #f1f8ff;
+        }
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .results-table th, .results-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        .results-table th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+        }
+        .results-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        .search-link {
+            color: #007bff;
+            text-decoration: none;
+            margin-right: 10px;
+        }
+        .search-link:hover {
+            text-decoration: underline;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        #fileList {
+            margin-top: 10px;
+            text-align: left;
+        }
+        .file-item {
+            background: #f8f9fa;
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .remove-file {
+            color: #dc3545;
+            cursor: pointer;
+            padding: 2px 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Enhanced Name Extractor</h1>
+        
+        <div class="input-section">
+            <h2>Step 1: Input Sources</h2>
+            
+            <div class="file-input-container" id="dropZone">
+                <input type="file" id="fileInput" multiple accept=".docx,.doc,.pdf,.csv" style="display: none">
+                <p>Drag and drop files here or <button onclick="document.getElementById('fileInput').click()">Browse Files</button></p>
+                <p class="supported-files">Supported files: DOCX, PDF, CSV</p>
+                <div id="fileList"></div>
+            </div>
+            
+            <div>
+                <label for="meetingText">Or paste text containing names:</label>
+                <textarea id="meetingText" placeholder="Paste text containing names here..."></textarea>
+            </div>
+            
+            <button onclick="startExtraction()" id="extractButton">Extract Names</button>
+        </div>
+        
+        <div id="status" class="status"></div>
+        
+        <div id="results">
+            <div id="namesList"></div>
+            <div id="searchLinks"></div>
+        </div>
+    </div>
+
+    <!-- Required libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    
+    <script>
+        // Name extraction utilities
+        const NameExtractor = {
+            commonWords: new Set([
+                'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+                'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+                'September', 'October', 'November', 'December', 'Meeting', 'Agenda',
+                'Conference', 'Call', 'Discussion', 'Project', 'Team', 'Overview',
+                'Session', 'Track', 'Panel', 'Report', 'Summary', 'Analysis', 'Review',
+                'Schedule', 'Program', 'Event', 'Workshop', 'Seminar', 'Class', 'Course'
+            ]),
+
+            isLikelyName(str) {
+                if (!str || typeof str !== 'string') return false;
+                
+                // Remove common titles
+                str = str.replace(/^(Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.) /, '').trim();
+                
+                // Basic name pattern: 2-3 capitalized words
+                const namePattern = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}$/;
+                
+                if (!namePattern.test(str)) return false;
+                if (this.commonWords.has(str)) return false;
+                
+                const words = str.split(' ');
+                return !words.some(word => this.commonWords.has(word));
+            },
+
+            extractNameFromEmail(email) {
+                if (!email || !email.includes('@')) return null;
+                
+                const localPart = email.split('@')[0];
+                
+                if (localPart.includes('.')) {
+                    return localPart
+                        .split('.')
+                        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                        .join(' ');
+                } else if (localPart.includes('_')) {
+                    return localPart
+                        .split('_')
+                        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                        .join(' ');
+                }
+                
+                return null;
+            },
+
+            extractNamesFromText(text) {
+                const names = new Set();
+                
+                // 1. Clean line endings
+                text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                
+                // 2. Email addresses
+                const emailPattern = /([a-zA-Z0-9._%+-]+)@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+                let match;
+                while ((match = emailPattern.exec(text)) !== null) {
+                    const potentialName = this.extractNameFromEmail(match[0]);
+                    if (potentialName && this.isLikelyName(potentialName)) {
+                        names.add(potentialName);
+                    }
+                }
+
+                // 3. Split text into lines and process each line
+                const lines = text.split('\n');
+                lines.forEach(line => {
+                    // Remove extra whitespace
+                    line = line.trim();
+                    
+                    // Skip empty lines
+                    if (!line) return;
+                    
+                    // Try to extract names from line
+                    const namePattern = /[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}/g;
+                    while ((match = namePattern.exec(line)) !== null) {
+                        const name = match[0].trim();
+                        if (this.isLikelyName(name)) {
+                            names.add(name);
+                        }
+                    }
+                });
+
+                return Array.from(names);
+            }
+        };
+
+        // File processors
+        const FileProcessor = {
+            async processWordFile(file) {
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer });
+                    return NameExtractor.extractNamesFromText(result.value);
+                } catch (error) {
+                    console.error('Error processing Word file:', error);
+                    return [];
+                }
+            },
+
+            async processPDFFile(file) {
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const loadingTask = pdfjsLib.getDocument(arrayBuffer);
+                    const pdf = await loadingTask.promise;
+                    let text = '';
+                    
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const content = await page.getTextContent();
+                        text += content.items.map(item => item.str).join(' ') + '\n';
+                    }
+                    
+                    return NameExtractor.extractNamesFromText(text);
+                } catch (error) {
+                    console.error('Error processing PDF file:', error);
+                    return [];
+                }
+            },
+
+            async processCSVFile(file) {
+                try {
+                    const text = await file.text();
+                    return new Promise((resolve, reject) => {
+                        Papa.parse(text, {
+                            header: true,
+                            skipEmptyLines: true,
+                            complete: (results) => {
+                                const names = new Set();
+                                
+                                results.data.forEach(row => {
+                                    Object.values(row).forEach(value => {
+                                        if (value && typeof value === 'string') {
+                                            const extractedNames = NameExtractor.extractNamesFromText(value);
+                                            extractedNames.forEach(name => names.add(name));
+                                        }
+                                    });
+                                });
+                                
+                                resolve(Array.from(names));
+                            },
+                            error: (error) => {
+                                console.error('Error parsing CSV:', error);
+                                reject(error);
+                            }
+                        });
+                    });
+                } catch (error) {
+                    console.error('Error processing CSV file:', error);
+                    return [];
+                }
+            }
+        };
+
+        // UI Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const meetingTextArea = document.getElementById('meetingText');
+        const status = document.getElementById('status');
+        const namesList = document.getElementById('namesList');
+        const searchLinks = document.getElementById('searchLinks');
+        const extractButton = document.getElementById('extractButton');
+
+        // Drag and drop handling
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', () => {
+            handleFiles(fileInput.files);
+        });
+
+        function handleFiles(files) {
+            updateFileList(Array.from(files));
+        }
+
+        function updateFileList(files) {
+            fileList.innerHTML = files.map((file, index) => `
+                <div class="file-item">
+                    <span>${file.name}</span>
+                    <span class="remove-file" onclick="removeFile(${index})">×</span>
+                </div>
+            `).join('');
+        }
+
+        function removeFile(index) {
+            const dt = new DataTransfer();
+            const files = Array.from(fileInput.files);
+            files.splice(index, 1);
+            files.forEach(file => dt.items.add(file));
+            fileInput.files = dt.files;
+            updateFileList(files);
+        }
+
+        async function startExtraction() {
+            try {
+                extractButton.disabled = true;
+                status.className = 'status';
+                status.textContent = 'Processing...';
+                
+                const names = new Set();
+                
+                // Process files
+                for (const file of fileInput.files) {
+                    let extractedNames = [];
+                    
+                    switch (file.type) {
+                        case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+                            extractedNames = await FileProcessor.processWordFile(file);
+                            break;
+                        case 'application/pdf':
+                            extractedNames = await FileProcessor.processPDFFile(file);
+                            break;
+                        case 'text/csv':
+                            extractedNames = await FileProcessor.processCSVFile(file);
+                            break;
+                    }
+                    
+                    extractedNames.forEach(name => names.add(name));
+                }
+                
+                // Process text input
+                if (meetingTextArea.value.trim()) {
+                    const textNames = NameExtractor.extractNamesFromText(meetingTextArea.value);
+                    textNames.forEach(name => names.add(name));
+                }
+                
+                displayResults(Array.from(names));
+                
+                status.className = 'status success';
+                status.textContent = `Successfully extracted ${names.size} names.`;
+            } catch (error) {
+                console.error('Extraction error:', error);
+                status.className = 'status error';
+                status.textContent = 'Error during extraction. Please try again.';
+            } finally {
+                extractButton.disabled = false;
+            }
+        }
+
+        function displayResults(names) {
+            namesList.innerHTML = `<h2>Found ${names.length} names:</h2>`;
+            
+            const table = document.createElement('table');
+            table.className = 'results-table';
+            
+            // Add header row
+            const headerRow = document.createElement('tr');
+            ['Name', 'Search Links'].forEach(headerText => {
+                const th = document.createElement('th');
+                th.textContent = headerText;
+                headerRow.appendChild(th);
+            });
+            table.appendChild(headerRow);
+            
+            // Add data rows
+            names.sort().forEach(name => {
+                const row = document.createElement('tr');
+                
+                // Name cell
+                const nameCell = document.createElement('td');
+                nameCell.textContent = name;
+                row.appendChild(nameCell);
+                
+                // Search links cell
+                const linksCell = document.createElement('td');
+                
+                // Google search link
+                const googleLink = document.createElement('a');
+                googleLink.href = `https://www.google.com/search?q=${encodeURIComponent(name)}`;
+                googleLink.textContent = 'Google';
+                googleLink.className = 'search-link';
+                googleLink.target = '_blank';
+                linksCell.appendChild(googleLink);
+                
+                // LinkedIn search link
+                const linkedinLink = document.createElement('a');
+                linkedinLink.href = `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(name)}`;
+                linkedinLink.textContent = 'LinkedIn';
+                linkedinLink.className = 'search-link';
+                linkedinLink.target = '_blank';
+                linksCell.appendChild(linkedinLink);
+                
+                row.appendChild(linksCell);
+                table.appendChild(row);
+            });
+            
+            namesList.appendChild(table);
+        }
+        
+        // Initialize PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+</body>
+</html>

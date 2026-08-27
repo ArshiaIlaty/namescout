@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "namescout"
+version = "0.1.0"
+description = "Extract people's names from any document, link or PDF, then open their LinkedIn / Google Scholar / X / ORCID profiles for research and outreach."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Arshia Ilaty" }]
+keywords = ["authors", "names", "ner", "arxiv", "crossref", "linkedin", "scholar", "research"]
+dependencies = [
+    "requests>=2.25",
+    "pdfminer.six>=20201018",
+]
+
+[project.optional-dependencies]
+# Best extraction on messy pages/PDFs: zero-shot NER with custom entity labels.
+# Downloads a model from HuggingFace on first use.
+gliner = ["gliner>=0.2.5"]
+# Alternative production NER (also needs a model: python -m spacy download en_core_web_sm).
+ner = ["spacy>=3.4"]
+# Clean article/main-content extraction from fetched web pages (drops nav/boilerplate).
+web = ["trafilatura>=1.6"]
+# Cleaner .docx parsing (a stdlib fallback is used when this is absent).
+docx = ["python-docx>=0.8"]
+# Better PDF -> text/markdown parsing (download models on first use).
+docling = ["docling>=2.0"]
+marker = ["marker-pdf>=1.0"]
+# Probabilistic author de-duplication for large/messy lists.
+splink = ["splink>=3.9", "pandas>=1.3"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+namescout = "namescout.cli:main"
+ascout = "namescout.cli:main"
+namescout-web = "namescout.webapp:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
